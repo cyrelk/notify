@@ -1,0 +1,53 @@
+#!/bin/sh
+
+# a sample script that's been launched by the manager.
+#  it reads a pipe and spawns a converter process for
+#  each file whose name is in the fifo.
+
+# FIXME: this script should be run on user behalf with his(her) id and credentials.
+
+WATCHER=../src/inwatcher
+
+folder=$1
+fifo=$2
+
+echo "wrapper receives" $folder $fifo
+
+input=${folder}/${fifo}
+
+destination=${HOME}/mybox/themes/converted
+
+# FIXME: should create a command makefifo or use
+#  the existing utilities to do that stuff, inwatcher
+#  id designed to watch, not create fifos, anyway...
+$WATCHER -i -e ${folder}/../${fifo}
+
+# we try to transform the command file to a pipe
+#  frankly i don't know if that's even necessary,
+#  but do it anyway.
+# --- BEGIN CRITICAL ---
+mv $input ${input}.1
+mv ${folder}/../${fifo} $input
+# --- END CRITICAL ---
+
+exec 6<>${input}
+{
+	while read line; do
+		echo $line >&6
+	done
+} <${input}.1
+
+while read -t 1 -u 6 line; do
+	echo " -- convertmagick treats ${line}"
+	/usr/bin/convert ${folder}/${line} ${destination}/${line%.*}.png
+done
+
+exec 6>&-
+exec 6<&-
+
+rm -f $input
+rm -f ${input}.1
+
+exit 0
+
+

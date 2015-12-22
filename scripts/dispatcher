@@ -1,0 +1,118 @@
+#!/bin/bash
+
+# this script reads the inwatcher pipe and dispatches messages
+#  to the corresponding pipes of the processors. It does that
+#  by parsing the message and get the pipe name to send to when
+#  extracting the last part of the message. For example, if inwatcher
+#  sends '/home/julius/magick' as a message, dispacher will know to send
+#  it to the pipe named 'magick' that the magick processor will then
+#  read and processes. The pipe resides at the root of the watched folder.
+
+WATCHER=../src/inwatcher
+MANAGER=./manager
+
+PREFIX_PATH=/tmp/manager/
+EVENT_FIFO=/tmp/enotify
+COMMAND_FIFO=/tmp/cnotify
+STATUS_FIFO=/tmp/snotify
+PREFIX_FIFO=${PREFIX_PATH}/manager.fifo
+
+
+finish () {
+	pkill ${MANAGER##*/}
+	echo " -- dispatcher done"
+	exit 0
+}
+
+trap finish INT
+trap finish TERM
+
+# better removing these files before starting the daemon
+#  because the system may transform their types after a reboot
+#  I don't know why, but in any case we need to clean up.
+if [ -e $EVENT_FIFO ]; then
+	rm -f $EVENT_FIFO
+fi
+
+if [ -e $COMMAND_FIFO ]; then
+	rm -f $COMMAND_FIFO
+fi
+
+if [ -e $STATUS_FIFO ]; then
+	rm -f $STATUS_FIFO
+fi
+
+if [ ! -d $PREFIX_PATH ]; then
+	mkdir -p $PREFIX_PATH
+else
+	rm -f $PREFIX_FIFO
+fi
+
+# we ask the watcher to create the fifos then quit
+$WATCHER -i -e $EVENT_FIFO
+if [ $? != 0 ]; then
+	echo " -- unable to create the $EVENT_FIFO fifo."
+	exit 1
+fi
+
+$WATCHER -i -e $COMMAND_FIFO
+if [ $? != 0 ]; then
+	echo " -- unable to create the $COMMAND_FIFO fifo."
+	exit 1
+fi
+
+$WATCHER -i -e $STATUS_FIFO
+if [ $? != 0 ]; then
+	echo " -- unable to create the $STATUS_FIFO fifo."
+	exit 1
+fi
+
+$WATCHER -i -e $PREFIX_FIFO
+if [ $? != 0 ]; then
+	echo " -- unable to create the $PREFIX_FIFO fifo."
+	exit 1
+fi
+
+# and now we start the watcher as a daemon to read inotify
+#  events and listen commands from us
+$WATCHER -e $EVENT_FIFO -c $COMMAND_FIFO -s $STATUS_FIFO -p $PREFIX_PATH &
+
+# FIXME: how to test if the daemon is not started correctly because of incorrect args?
+
+# FIXME: the order of opening must be the SAME as the one used
+#        by inwatcher or else that locks. that *stinks*
+#        for the moment we open a fifo read/write to not be
+#        blocked but we think that inwatcher should do that for us.
+#        and we MUST redirect ALL the pipes opened by inwatcher
+#        for the same reason.
+exec 3<${EVENT_FIFO}   # first one like inwatcher so that's "ok"
+exec 4<>${STATUS_FIFO} # in fact readonly but opened non blocking
+exec 5>${COMMAND_FIFO} # not used but necessary
+
+read -u 4 status
+if [ "$status" = "FAILURE" ]; then
+	echo " -- unable to start inotify in daemon mode."
+	exit 1
+fi
+
+echo " -- $WATCHER status: $status"
+
+$MANAGER &
+
+echo " -- starting dispatcher loop"
+
+# in fact we don't write into a pipe because it does not exist yet.
+#  what happens is that we create a file and write into it, then
+#  the processor that reads that file will convert it into a fifo
+#  and push the content of the file into it. See ConvertMagick
+#  to see how it's done.
+while read -u 3 event; do
+	echo $event $'\n'
+	pathname=${event%//*}
+	fifoname=${pathname##*/}.fifo
+	filename=${event##*//}
+	echo $filename '>>' $pathname/$fifoname
+	echo $filename >> ${pathname}/${fifoname}
+done
+
+

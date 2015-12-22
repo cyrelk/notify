@@ -1,0 +1,62 @@
+#!/bin/bash
+
+# this script reads the manager.fifo pipe written by the dispatcher
+#  and start the processing wrappers.
+
+WATCHER=../src/inwatcher
+
+PREFIX_PATH=/tmp/manager/
+EVENT_FIFO=/tmp/enotify
+COMMAND_FIFO=/tmp/cnotify
+STATUS_FIFO=/tmp/snotify
+PREFIX_FIFO=${PREFIX_PATH}/manager.fifo
+
+finish () {
+	echo " -- manager done"
+	exit 0
+}
+
+trap finish INT
+trap finish TERM
+
+# the better way to open fifos because opening them read
+#  or write only can block until the other part is ready.
+#  in some cases it can lead to races conditions.
+exec 3<>${PREFIX_FIFO}
+exec 4<${STATUS_FIFO}
+
+# ask inwatcher to open some watches, this is for example only!
+#  in production that should be done by some scripts connected
+#  to subscription section of the web site.
+echo "add /home/cyril/mybox/image" >${COMMAND_FIFO}
+read -u 4 status && echo $status
+echo "add /home/cyril/mybox/audio" >${COMMAND_FIFO}
+read -u 4 status && echo $status
+echo "add /home/cyril/mybox/video" >${COMMAND_FIFO}
+read -u 4 status && echo $status
+echo "add /home/cyril/mybox/convertmagick" >${COMMAND_FIFO}
+read -u 4 status && echo $status
+
+echo "LIST" >${COMMAND_FIFO}
+while read -t 1 -u 4 status ; do
+	echo $status
+done
+
+echo " -- starting manager loop"
+
+# we read the fifo written by the dispatcher and start the
+#  processing wrappers accordingly. At this moment the wrappers
+#  are found in the same folder but that could change.
+#  the event received has the form:
+#   /path/.../name/fifoname.fifo
+while read -u 3 event; do
+	echo " -- manager receives " $event $'\n'
+	path=${event%/*}
+	fifo=${event##*/}
+	wrapper=${fifo%.fifo}
+	# we need to put a slash before the path
+	./${wrapper} /${path} $fifo&
+done
+
+
+

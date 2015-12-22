@@ -1,0 +1,25 @@
+#!/bin/bash
+
+walk () {
+	echo " - walking folder ${folder}"
+	for f in $(ls); do
+		echo $f
+		if [ "$f" = "$fifo" ]; then
+			echo "skipping..."
+			continue
+		fi
+		if [ -d $f ]; then
+			echo "ok"
+			pushd $f
+			walk
+			popd
+		else
+			echo " -- converting file: $f"
+			/usr/bin/convert ./$f /home/cyril/converted/${f%%.*}.png
+		fi
+	done
+}
+
+pushd $folder
+walk
+popd

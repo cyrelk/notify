@@ -1,0 +1,24 @@
+#!/bin/bash
+
+FOLDERS=/home/*/mybox/
+FIFO=/home/cyril/inotify
+
+if [ ! -p ${FIFO} ]; then
+	mkfifo ${FIFO};
+fi
+
+inotifywait -r -m -e close --format '%w : %f' ${FOLDERS} > ${FIFO} &
+
+# exit 0
+
+exec 3<${FIFO}
+
+while read -u 3 event; do
+	echo " -- " $event;
+	path=$(echo $event | cut -f 1 -d : -)
+	file=$(echo $event | cut -f 2 -d : -)
+
+	path=${path#${FOLDERS}}
+	echo $path $file
+done
+
